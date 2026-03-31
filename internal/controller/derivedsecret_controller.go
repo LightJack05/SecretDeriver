@@ -129,11 +129,43 @@ func (r *DerivedSecretReconciler) createDerivedSecret(ctx context.Context, deriv
 			return fmt.Errorf("failed to create derived secret: %w", err)
 		}
 	} else {
-		// Secret exists, ignore it and log the incident
-		logf.FromContext(ctx).Info("Derived secret already exists, skipping update", "namespace", secret.Namespace, "name", secret.Name)
+		newSecretContent := map[string][]byte{
+			derivedSecret.Spec.GeneratedSecretKey: derivedValue,
+		}
+		if !equalSecretData(secret.Data, newSecretContent) {
+			secret.Data = newSecretContent
+			if err := r.Update(ctx, secret); err != nil {
+				return fmt.Errorf("failed to update derived secret: %w", err)
+			}
+		}
 	}
 
 	return nil
+}
+
+func equalSecretData(presentSecretContent map[string][]byte, newSecretContent map[string][]byte) bool {
+	if len(presentSecretContent) != len(newSecretContent) {
+		return false
+	}
+	for key, newValue := range newSecretContent {
+		presentValue, exists := presentSecretContent[key]
+		if !exists || !equalByteSlices(presentValue, newValue) {
+			return false
+		}
+	}
+	return true
+}
+
+func equalByteSlices(presentValue []byte, newValue []byte) bool {
+	if len(presentValue) != len(newValue) {
+		return false
+	}
+	for i := range presentValue {
+		if presentValue[i] != newValue[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func (r *DerivedSecretReconciler) deriveValue(ctx context.Context, derivedSecret *secretderiverv1alpha1.DerivedSecret, sourceValue []byte) ([]byte, error) {
