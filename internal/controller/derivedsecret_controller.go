@@ -234,5 +234,6 @@ func (r *DerivedSecretReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&secretderiverv1alpha1.DerivedSecret{}).
 		Named("derivedsecret").
+		Owns(&corev1.Secret{}).
 		Complete(r)
 }
