@@ -11,9 +11,14 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	secretderiverv1alpha1 "github.com/LightJack05/SecretDeriver/api/v1alpha1"
 )
@@ -147,10 +152,10 @@ func (r *DerivedSecretReconciler) deriveValue(ctx context.Context, derivedSecret
 func (r *DerivedSecretReconciler) updateStatusReady(ctx context.Context, derivedSecret *secretderiverv1alpha1.DerivedSecret) error {
 	derivedSecret.Status.Conditions = []metav1.Condition{
 		{
-			Type:    "Ready",
-			Status:  metav1.ConditionTrue,
-			Reason:  "DerivationSuccessful",
-			Message: "The derived secret has been successfully created or updated.",
+			Type:               "Ready",
+			Status:             metav1.ConditionTrue,
+			Reason:             "DerivationSuccessful",
+			Message:            "The derived secret has been successfully created or updated.",
 			LastTransitionTime: metav1.Now(),
 		},
 	}
@@ -164,10 +169,10 @@ func (r *DerivedSecretReconciler) updateStatusReady(ctx context.Context, derived
 func (r *DerivedSecretReconciler) handleDerivationError(ctx context.Context, derivedSecret *secretderiverv1alpha1.DerivedSecret, err error) error {
 	derivedSecret.Status.Conditions = []metav1.Condition{
 		{
-			Type:    "Error",
-			Status:  metav1.ConditionTrue,
-			Reason:  "DerivationFailed",
-			Message: fmt.Sprintf("Failed to derive value: %v", err),
+			Type:               "Error",
+			Status:             metav1.ConditionTrue,
+			Reason:             "DerivationFailed",
+			Message:            fmt.Sprintf("Failed to derive value: %v", err),
 			LastTransitionTime: metav1.Now(),
 		},
 	}
@@ -181,10 +186,10 @@ func (r *DerivedSecretReconciler) handleDerivationError(ctx context.Context, der
 func (r *DerivedSecretReconciler) handleEmptyValueInParent(ctx context.Context, derivedSecret *secretderiverv1alpha1.DerivedSecret) error {
 	derivedSecret.Status.Conditions = []metav1.Condition{
 		{
-			Type:    "Ready",
-			Status:  metav1.ConditionFalse,
-			Reason:  "EmptyValue",
-			Message: "The specified key in the parent secret has an empty value.",
+			Type:               "Ready",
+			Status:             metav1.ConditionFalse,
+			Reason:             "EmptyValue",
+			Message:            "The specified key in the parent secret has an empty value.",
 			LastTransitionTime: metav1.Now(),
 		},
 	}
@@ -198,10 +203,10 @@ func (r *DerivedSecretReconciler) handleEmptyValueInParent(ctx context.Context, 
 func (r *DerivedSecretReconciler) handleKeyNotFoundInParent(ctx context.Context, derivedSecret *secretderiverv1alpha1.DerivedSecret) error {
 	derivedSecret.Status.Conditions = []metav1.Condition{
 		{
-			Type:    "Ready",
-			Status:  metav1.ConditionFalse,
-			Reason:  "KeyNotFound",
-			Message: "The specified key does not exist in the parent secret.",
+			Type:               "Ready",
+			Status:             metav1.ConditionFalse,
+			Reason:             "KeyNotFound",
+			Message:            "The specified key does not exist in the parent secret.",
 			LastTransitionTime: metav1.Now(),
 		},
 	}
@@ -215,10 +220,10 @@ func (r *DerivedSecretReconciler) handleKeyNotFoundInParent(ctx context.Context,
 func (r *DerivedSecretReconciler) handleParentSecretNotFound(ctx context.Context, derivedSecret *secretderiverv1alpha1.DerivedSecret) error {
 	derivedSecret.Status.Conditions = []metav1.Condition{
 		{
-			Type:    "Ready",
-			Status:  metav1.ConditionFalse,
-			Reason:  "ParentSecretNotFound",
-			Message: "The specified parent secret does not exist.",
+			Type:               "Ready",
+			Status:             metav1.ConditionFalse,
+			Reason:             "ParentSecretNotFound",
+			Message:            "The specified parent secret does not exist.",
 			LastTransitionTime: metav1.Now(),
 		},
 	}
@@ -235,5 +240,30 @@ func (r *DerivedSecretReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&secretderiverv1alpha1.DerivedSecret{}).
 		Named("derivedsecret").
 		Owns(&corev1.Secret{}).
+		Watches(
+			&corev1.Secret{},
+			handler.EnqueueRequestsFromMapFunc(r.findDerivedSecretsForParent),
+			builder.WithPredicates(predicate.ResourceVersionChangedPredicate{}),
+		).
 		Complete(r)
+}
+
+func (r *DerivedSecretReconciler) findDerivedSecretsForParent(ctx context.Context, secret client.Object) []reconcile.Request {
+	derivedSecretList := &secretderiverv1alpha1.DerivedSecretList{}
+	if err := r.List(ctx, derivedSecretList); err != nil {
+		return nil
+	}
+
+	var requests []reconcile.Request
+	for _, ds := range derivedSecretList.Items {
+		if ds.Spec.ParentSecretRef.Name == secret.GetName() && ds.Spec.ParentSecretRef.Namespace == secret.GetNamespace() {
+			requests = append(requests, reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      ds.Name,
+					Namespace: ds.Namespace,
+				},
+			})
+		}
+	}
+	return requests
 }
