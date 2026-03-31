@@ -33,7 +33,6 @@ type DerivedSecretReconciler struct {
 func (r *DerivedSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	_ = logf.FromContext(ctx)
 
-	// TODO(user): your logic here
 
 	return ctrl.Result{}, nil
 }
