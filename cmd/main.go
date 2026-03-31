@@ -20,6 +20,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
+
+	secretderiverv1alpha1 "github.com/LightJack05/SecretDeriver/api/v1alpha1"
+	"github.com/LightJack05/SecretDeriver/internal/controller"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -31,6 +34,7 @@ var (
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
+	utilruntime.Must(secretderiverv1alpha1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 
@@ -182,6 +186,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err := (&controller.DerivedSecretReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "DerivedSecret")
+		os.Exit(1)
+	}
 	// +kubebuilder:scaffold:builder
 
 	if metricsCertWatcher != nil {
