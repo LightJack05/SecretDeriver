@@ -1,8 +1,8 @@
 package v1alpha1
 
 import (
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
@@ -11,7 +11,7 @@ import (
 // DerivedSecretSpec defines the desired state of DerivedSecret.
 type DerivedSecretSpec struct {
 	ParentSecretRef corev1.SecretReference `json:"parentSecretRef" binding:"required"`
-	ParentSecretKey string `json:"parentSecretKey" binding:"required"`
+	ParentSecretKey string                 `json:"parentSecretKey" binding:"required"`
 }
 
 // DerivedSecretStatus defines the observed state of DerivedSecret.
