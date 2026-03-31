@@ -2,7 +2,14 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
+	"fmt"
+	"io"
+	"time"
 
+	hkdf "golang.org/x/crypto/hkdf"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -21,6 +28,11 @@ type DerivedSecretReconciler struct {
 // +kubebuilder:rbac:groups=secretderiver.lightjack.de,resources=derivedsecrets/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=secretderiver.lightjack.de,resources=derivedsecrets/finalizers,verbs=update
 
+// Allow reading secrets globally
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
+// Allow writing secrets in the same namespace as the DerivedSecret
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=create;update;patch;delete
+
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
 // TODO(user): Modify the Reconcile function to compare the state specified by
@@ -34,7 +46,187 @@ func (r *DerivedSecretReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	log := logf.FromContext(ctx)
 	log.Info("Got request to reconcile object", "namespace", req.Namespace, "name", req.Name)
 
+	derivedSecret := &secretderiverv1alpha1.DerivedSecret{}
+	if err := r.Get(ctx, req.NamespacedName, derivedSecret); err != nil {
+		log.Error(err, "unable to fetch DerivedSecret")
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+
+	parentSecretRef := derivedSecret.Spec.ParentSecretRef
+	parentSecretKey := derivedSecret.Spec.ParentSecretKey
+
+	parentSecret := &corev1.Secret{}
+	if err := r.Get(ctx, client.ObjectKey{Namespace: parentSecretRef.Namespace, Name: parentSecretRef.Name}, parentSecret); err != nil {
+		log.Error(err, "unable to fetch parent secret", "namespace", parentSecretRef.Namespace, "name", parentSecretRef.Name)
+		if err := r.handleParentSecretNotFound(ctx, derivedSecret); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+
+	sourceValue, exists := parentSecret.Data[parentSecretKey]
+	if !exists {
+		log.Info("Specified key not found in parent secret", "key", parentSecretKey)
+		if err := r.handleKeyNotFoundInParent(ctx, derivedSecret); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	}
+
+	if len(sourceValue) == 0 {
+		log.Info("Specified key in parent secret has an empty value", "key", parentSecretKey)
+		if err := r.handleEmptyValueInParent(ctx, derivedSecret); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	}
+
+	derivedValue, err := r.deriveValue(ctx, derivedSecret, sourceValue)
+	if err != nil {
+		log.Error(err, "failed to derive value")
+		return ctrl.Result{}, err
+	}
+
+	if err := r.createDerivedSecret(ctx, derivedSecret, derivedValue); err != nil {
+		log.Error(err, "failed to create or update derived secret")
+		return ctrl.Result{}, err
+	}
+
+	if err := r.updateStatusReady(ctx, derivedSecret); err != nil {
+		log.Error(err, "failed to update DerivedSecret status")
+		return ctrl.Result{}, err
+	}
+
 	return ctrl.Result{}, nil
+}
+
+func (r *DerivedSecretReconciler) createDerivedSecret(ctx context.Context, derivedSecret *secretderiverv1alpha1.DerivedSecret, derivedValue []byte) error {
+	secret := &corev1.Secret{}
+	if err := r.Get(ctx, client.ObjectKey{Namespace: derivedSecret.Namespace, Name: derivedSecret.Name}, secret); err != nil {
+		if client.IgnoreNotFound(err) != nil {
+			return fmt.Errorf("failed to check for existing derived secret: %w", err)
+		}
+
+		// Secret does not exist, create it
+		newSecret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      derivedSecret.Name,
+				Namespace: derivedSecret.Namespace,
+				OwnerReferences: []metav1.OwnerReference{
+					*metav1.NewControllerRef(derivedSecret, secretderiverv1alpha1.GroupVersion.WithKind("DerivedSecret")),
+				},
+			},
+			Data: map[string][]byte{
+				derivedSecret.Spec.GeneratedSecretKey: derivedValue,
+			},
+		}
+		if err := r.Create(ctx, newSecret); err != nil {
+			return fmt.Errorf("failed to create derived secret: %w", err)
+		}
+	} else {
+		// Secret exists, ignore it and log the incident
+		logf.FromContext(ctx).Info("Derived secret already exists, skipping update", "namespace", secret.Namespace, "name", secret.Name)
+	}
+
+	return nil
+}
+
+func (r *DerivedSecretReconciler) deriveValue(ctx context.Context, derivedSecret *secretderiverv1alpha1.DerivedSecret, sourceValue []byte) ([]byte, error) {
+	salt := []byte(derivedSecret.Name + derivedSecret.Namespace)
+	hkdfReader := hkdf.New(sha256.New, sourceValue, salt, nil)
+
+	derivedValue := make([]byte, 32)
+	_, err := io.ReadFull(hkdfReader, derivedValue)
+	if err != nil {
+		return nil, fmt.Errorf("failed to derive value using HKDF: %w", err)
+	}
+
+	return derivedValue, nil
+}
+
+func (r *DerivedSecretReconciler) updateStatusReady(ctx context.Context, derivedSecret *secretderiverv1alpha1.DerivedSecret) error {
+	derivedSecret.Status.Conditions = []metav1.Condition{
+		{
+			Type:    "Ready",
+			Status:  metav1.ConditionTrue,
+			Reason:  "DerivationSuccessful",
+			Message: "The derived secret has been successfully created or updated.",
+			LastTransitionTime: metav1.Now(),
+		},
+	}
+	derivedSecret.Status.Phase = "Ready"
+	if err := r.Status().Update(ctx, derivedSecret); err != nil {
+		return fmt.Errorf("failed to update DerivedSecret status: %w", err)
+	}
+	return nil
+}
+
+func (r *DerivedSecretReconciler) handleDerivationError(ctx context.Context, derivedSecret *secretderiverv1alpha1.DerivedSecret, err error) error {
+	derivedSecret.Status.Conditions = []metav1.Condition{
+		{
+			Type:    "Error",
+			Status:  metav1.ConditionTrue,
+			Reason:  "DerivationFailed",
+			Message: fmt.Sprintf("Failed to derive value: %v", err),
+			LastTransitionTime: metav1.Now(),
+		},
+	}
+	derivedSecret.Status.Phase = "Error"
+	if err := r.Status().Update(ctx, derivedSecret); err != nil {
+		return fmt.Errorf("failed to update DerivedSecret status: %w", err)
+	}
+	return nil
+}
+
+func (r *DerivedSecretReconciler) handleEmptyValueInParent(ctx context.Context, derivedSecret *secretderiverv1alpha1.DerivedSecret) error {
+	derivedSecret.Status.Conditions = []metav1.Condition{
+		{
+			Type:    "Ready",
+			Status:  metav1.ConditionFalse,
+			Reason:  "EmptyValue",
+			Message: "The specified key in the parent secret has an empty value.",
+			LastTransitionTime: metav1.Now(),
+		},
+	}
+	derivedSecret.Status.Phase = "Error"
+	if err := r.Status().Update(ctx, derivedSecret); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (r *DerivedSecretReconciler) handleKeyNotFoundInParent(ctx context.Context, derivedSecret *secretderiverv1alpha1.DerivedSecret) error {
+	derivedSecret.Status.Conditions = []metav1.Condition{
+		{
+			Type:    "Ready",
+			Status:  metav1.ConditionFalse,
+			Reason:  "KeyNotFound",
+			Message: "The specified key does not exist in the parent secret.",
+			LastTransitionTime: metav1.Now(),
+		},
+	}
+	derivedSecret.Status.Phase = "Error"
+	if err := r.Status().Update(ctx, derivedSecret); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (r *DerivedSecretReconciler) handleParentSecretNotFound(ctx context.Context, derivedSecret *secretderiverv1alpha1.DerivedSecret) error {
+	derivedSecret.Status.Conditions = []metav1.Condition{
+		{
+			Type:    "Ready",
+			Status:  metav1.ConditionFalse,
+			Reason:  "ParentSecretNotFound",
+			Message: "The specified parent secret does not exist.",
+			LastTransitionTime: metav1.Now(),
+		},
+	}
+	derivedSecret.Status.Phase = "Error"
+	if err := r.Status().Update(ctx, derivedSecret); err != nil {
+		return err
+	}
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

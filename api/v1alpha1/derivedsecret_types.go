@@ -10,8 +10,9 @@ import (
 
 // DerivedSecretSpec defines the desired state of DerivedSecret.
 type DerivedSecretSpec struct {
-	ParentSecretRef corev1.SecretReference `json:"parentSecretRef" binding:"required"`
-	ParentSecretKey string                 `json:"parentSecretKey" binding:"required"`
+	ParentSecretRef    corev1.SecretReference `json:"parentSecretRef" binding:"required"`
+	ParentSecretKey    string                 `json:"parentSecretKey" binding:"required"`
+	GeneratedSecretKey string                 `json:"generatedSecretKey" binding:"required"`
 }
 
 // DerivedSecretStatus defines the observed state of DerivedSecret.
@@ -21,6 +22,9 @@ type DerivedSecretStatus struct {
 
 	// +operator-sdk:csv:customresourcedefinitions:type=status
 	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
+
+    // +optional
+    Phase string `json:"phase,omitempty"`
 }
 
 // +kubebuilder:object:root=true

@@ -1,0 +1,65 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: secretnamespaceone
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: secretnamespacetwo
+---
+# https://kubernetes.io/docs/concepts/configuration/secret/
+apiVersion: v1
+kind: Secret
+metadata:
+  name: rootsecretone
+  namespace: secretnamespaceone
+type: Opaque
+stringData:
+  foo: b78f5c3c-b3c1-4d0e-9367-aebd02827e38
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: rootsecrettwo
+  namespace: secretnamespacetwo
+type: Opaque
+stringData:
+  bar: 9c8f5a3e-1d2b-40e-8c7a-5f6d02827e38
+---
+apiVersion: secretderiver.lightjack.de/v1alpha1
+kind: DerivedSecret
+metadata:
+  name: foo
+  namespace: secretnamespaceone
+spec:
+  parentSecretRef:
+    name: rootsecretone
+    namespace: secretnamespaceone
+  parentSecretKey: foo
+  generatedSecretKey: foo
+---
+apiVersion: secretderiver.lightjack.de/v1alpha1
+kind: DerivedSecret
+metadata:
+  name: bar
+  namespace: secretnamespacetwo
+spec:
+  parentSecretRef:
+    name: rootsecretone
+    namespace: secretnamespaceone
+  parentSecretKey: foo
+  generatedSecretKey: bar
+---
+apiVersion: secretderiver.lightjack.de/v1alpha1
+kind: DerivedSecret
+metadata:
+  name: baz
+  namespace: secretnamespacetwo
+spec:
+  parentSecretRef:
+    name: rootsecrettwo
+    namespace: secretnamespacetwo
+  parentSecretKey: lolerror
+  generatedSecretKey: lel
