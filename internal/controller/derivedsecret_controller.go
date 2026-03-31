@@ -31,7 +31,10 @@ type DerivedSecretReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.21.0/pkg/reconcile
 func (r *DerivedSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = logf.FromContext(ctx)
+	log := logf.FromContext(ctx)
+	log.Info("Got request to reconcile object", "namespace", req.Namespace, "name", req.Name)
+
+	
 
 
 	return ctrl.Result{}, nil
