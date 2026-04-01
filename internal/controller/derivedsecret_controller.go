@@ -89,6 +89,9 @@ func (r *DerivedSecretReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	derivedValue, err := r.deriveValue(ctx, derivedSecret, sourceValue)
 	if err != nil {
 		log.Error(err, "failed to derive value")
+		if err := r.handleDerivationError(ctx, derivedSecret, err); err != nil {
+			return ctrl.Result{}, err
+		}
 		return ctrl.Result{}, err
 	}
 
