@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/subtle"
 	"fmt"
 	"io"
 	"time"
@@ -152,19 +153,7 @@ func equalSecretData(presentSecretContent map[string][]byte, newSecretContent ma
 	}
 	for key, newValue := range newSecretContent {
 		presentValue, exists := presentSecretContent[key]
-		if !exists || !equalByteSlices(presentValue, newValue) {
-			return false
-		}
-	}
-	return true
-}
-
-func equalByteSlices(presentValue []byte, newValue []byte) bool {
-	if len(presentValue) != len(newValue) {
-		return false
-	}
-	for i := range presentValue {
-		if presentValue[i] != newValue[i] {
+		if !exists || subtle.ConstantTimeCompare(presentValue, newValue) != 1 {
 			return false
 		}
 	}
