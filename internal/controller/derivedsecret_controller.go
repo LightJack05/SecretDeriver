@@ -36,7 +36,7 @@ type DerivedSecretReconciler struct {
 // Allow reading secrets globally
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 // Allow writing secrets in the same namespace as the DerivedSecret
-// +kubebuilder:rbac:groups="",resources=secrets,verbs=create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=create;update
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
