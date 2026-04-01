@@ -10,9 +10,14 @@ import (
 
 // DerivedSecretSpec defines the desired state of DerivedSecret.
 type DerivedSecretSpec struct {
-	ParentSecretRef    corev1.SecretReference `json:"parentSecretRef" binding:"required"`
-	ParentSecretKey    string                 `json:"parentSecretKey" binding:"required"`
-	GeneratedSecretKey string                 `json:"generatedSecretKey" binding:"required"`
+	// +kubebuilder:validation:Required
+	ParentSecretRef corev1.SecretReference `json:"parentSecretRef"`
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	ParentSecretKey string `json:"parentSecretKey"`
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	GeneratedSecretKey string `json:"generatedSecretKey"`
 }
 
 // DerivedSecretStatus defines the observed state of DerivedSecret.
@@ -35,7 +40,8 @@ type DerivedSecret struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   DerivedSecretSpec   `json:"spec,omitempty"`
+	// +kubebuilder:validation:Required
+	Spec   DerivedSecretSpec   `json:"spec"`
 	Status DerivedSecretStatus `json:"status,omitempty"`
 }
 
