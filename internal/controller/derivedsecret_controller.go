@@ -169,7 +169,7 @@ func equalByteSlices(presentValue []byte, newValue []byte) bool {
 }
 
 func (r *DerivedSecretReconciler) deriveValue(ctx context.Context, derivedSecret *secretderiverv1alpha1.DerivedSecret, sourceValue []byte) ([]byte, error) {
-	salt := []byte(derivedSecret.Name + derivedSecret.Namespace)
+	salt := []byte(derivedSecret.Namespace + "/" + derivedSecret.Name)
 	hkdfReader := hkdf.New(sha256.New, sourceValue, salt, nil)
 
 	derivedValue := make([]byte, 32)
