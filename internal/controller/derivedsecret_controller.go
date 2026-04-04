@@ -25,7 +25,10 @@ import (
 	secretderiverv1alpha1 "github.com/LightJack05/SecretDeriver/api/v1alpha1"
 )
 
-// DerivedSecretReconciler reconciles a DerivedSecret object
+// DerivedSecretReconciler reconciles DerivedSecret resources.
+// For each DerivedSecret it reads a value from the referenced parent Secret, derives a new
+// value using HKDF-SHA256 (salted with the resource's namespace/name), and writes the result
+// into a managed Kubernetes Secret of the same name and namespace.
 type DerivedSecretReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
@@ -40,15 +43,9 @@ type DerivedSecretReconciler struct {
 // Allow writing secrets in the same namespace as the DerivedSecret
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=create;update
 
-// Reconcile is part of the main kubernetes reconciliation loop which aims to
-// move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the DerivedSecret object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
-// the user.
-//
-// For more details, check Reconcile and its Result here:
-// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.21.0/pkg/reconcile
+// Reconcile fetches the DerivedSecret, resolves the parent secret, derives the value, and
+// ensures the generated Secret exists with the correct content. It updates the DerivedSecret
+// status after every attempt.
 func (r *DerivedSecretReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 	log.Info("Got request to reconcile object", "namespace", req.Namespace, "name", req.Name)
@@ -118,6 +115,9 @@ func (r *DerivedSecretReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	return ctrl.Result{}, nil
 }
 
+// createDerivedSecret creates the generated Secret if it does not exist, or updates it if its
+// content differs from the expected derived value. Updates are skipped when the content is
+// already correct to avoid unnecessary API writes.
 func (r *DerivedSecretReconciler) createDerivedSecret(ctx context.Context, derivedSecret *secretderiverv1alpha1.DerivedSecret, derivedValue []byte) error {
 	secret := &corev1.Secret{}
 	if err := r.Get(ctx, client.ObjectKey{Namespace: derivedSecret.Namespace, Name: derivedSecret.Name}, secret); err != nil {
@@ -156,6 +156,8 @@ func (r *DerivedSecretReconciler) createDerivedSecret(ctx context.Context, deriv
 	return nil
 }
 
+// equalSecretData reports whether two Secret data maps have identical keys and values.
+// Values are compared using constant-time comparison to avoid timing side channels.
 func equalSecretData(presentSecretContent map[string][]byte, newSecretContent map[string][]byte) bool {
 	if len(presentSecretContent) != len(newSecretContent) {
 		return false
@@ -169,6 +171,9 @@ func equalSecretData(presentSecretContent map[string][]byte, newSecretContent ma
 	return true
 }
 
+// deriveValue produces a deterministic 32-byte secret using HKDF-SHA256.
+// The HKDF input key material is sourceValue; the salt is "namespace/name" of the
+// DerivedSecret. The output is returned as a base64url-encoded string (no padding).
 func (r *DerivedSecretReconciler) deriveValue(ctx context.Context, derivedSecret *secretderiverv1alpha1.DerivedSecret, sourceValue []byte) ([]byte, error) {
 	salt := []byte(derivedSecret.Namespace + "/" + derivedSecret.Name)
 	hkdfReader := hkdf.New(sha256.New, sourceValue, salt, nil)
@@ -182,6 +187,7 @@ func (r *DerivedSecretReconciler) deriveValue(ctx context.Context, derivedSecret
 	return []byte(base64.RawURLEncoding.EncodeToString(rawValue)), nil
 }
 
+// updateStatusReady sets the DerivedSecret status to Ready after a successful derivation.
 func (r *DerivedSecretReconciler) updateStatusReady(ctx context.Context, derivedSecret *secretderiverv1alpha1.DerivedSecret) error {
 	derivedSecret.Status.Conditions = []metav1.Condition{
 		{
@@ -199,6 +205,7 @@ func (r *DerivedSecretReconciler) updateStatusReady(ctx context.Context, derived
 	return nil
 }
 
+// handleDerivationError records an Error status when HKDF derivation fails.
 func (r *DerivedSecretReconciler) handleDerivationError(ctx context.Context, derivedSecret *secretderiverv1alpha1.DerivedSecret, err error) error {
 	derivedSecret.Status.Conditions = []metav1.Condition{
 		{
@@ -216,6 +223,8 @@ func (r *DerivedSecretReconciler) handleDerivationError(ctx context.Context, der
 	return nil
 }
 
+// handleEmptyValueInParent records an Error status when the referenced key exists in the
+// parent secret but its value is empty.
 func (r *DerivedSecretReconciler) handleEmptyValueInParent(ctx context.Context, derivedSecret *secretderiverv1alpha1.DerivedSecret) error {
 	derivedSecret.Status.Conditions = []metav1.Condition{
 		{
@@ -233,6 +242,8 @@ func (r *DerivedSecretReconciler) handleEmptyValueInParent(ctx context.Context, 
 	return nil
 }
 
+// handleKeyNotFoundInParent records an Error status when the specified parentSecretKey does
+// not exist in the parent secret.
 func (r *DerivedSecretReconciler) handleKeyNotFoundInParent(ctx context.Context, derivedSecret *secretderiverv1alpha1.DerivedSecret) error {
 	derivedSecret.Status.Conditions = []metav1.Condition{
 		{
@@ -250,6 +261,9 @@ func (r *DerivedSecretReconciler) handleKeyNotFoundInParent(ctx context.Context,
 	return nil
 }
 
+// handleParentSecretNotFound records an Error status when the parent secret cannot be
+// resolved — either because it does not exist or because a cross-namespace reference is
+// missing the required opt-in label.
 func (r *DerivedSecretReconciler) handleParentSecretNotFound(ctx context.Context, derivedSecret *secretderiverv1alpha1.DerivedSecret) error {
 	derivedSecret.Status.Conditions = []metav1.Condition{
 		{
@@ -267,7 +281,9 @@ func (r *DerivedSecretReconciler) handleParentSecretNotFound(ctx context.Context
 	return nil
 }
 
-// SetupWithManager sets up the controller with the Manager.
+// SetupWithManager registers the controller with the Manager. In addition to owning the
+// generated Secrets, the controller watches all Secrets so that changes to a parent secret
+// immediately trigger reconciliation of any DerivedSecret that references it.
 func (r *DerivedSecretReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&secretderiverv1alpha1.DerivedSecret{}).
@@ -281,6 +297,8 @@ func (r *DerivedSecretReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
+// findDerivedSecretsForParent maps a Secret to the DerivedSecrets that reference it as their
+// parent, so that those resources are re-queued whenever the parent secret changes.
 func (r *DerivedSecretReconciler) findDerivedSecretsForParent(ctx context.Context, secret client.Object) []reconcile.Request {
 	derivedSecretList := &secretderiverv1alpha1.DerivedSecretList{}
 	if err := r.List(ctx, derivedSecretList); err != nil {
