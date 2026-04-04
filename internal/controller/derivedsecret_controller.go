@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"time"
@@ -172,13 +173,13 @@ func (r *DerivedSecretReconciler) deriveValue(ctx context.Context, derivedSecret
 	salt := []byte(derivedSecret.Namespace + "/" + derivedSecret.Name)
 	hkdfReader := hkdf.New(sha256.New, sourceValue, salt, nil)
 
-	derivedValue := make([]byte, 32)
-	_, err := io.ReadFull(hkdfReader, derivedValue)
+	rawValue := make([]byte, 32)
+	_, err := io.ReadFull(hkdfReader, rawValue)
 	if err != nil {
 		return nil, fmt.Errorf("failed to derive value using HKDF: %w", err)
 	}
 
-	return derivedValue, nil
+	return []byte(base64.RawURLEncoding.EncodeToString(rawValue)), nil
 }
 
 func (r *DerivedSecretReconciler) updateStatusReady(ctx context.Context, derivedSecret *secretderiverv1alpha1.DerivedSecret) error {
