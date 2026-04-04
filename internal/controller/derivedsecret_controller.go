@@ -63,11 +63,19 @@ func (r *DerivedSecretReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	parentSecret := &corev1.Secret{}
 	if err := r.Get(ctx, client.ObjectKey{Namespace: parentSecretRef.Namespace, Name: parentSecretRef.Name}, parentSecret); err != nil {
-		log.Error(err, "unable to fetch parent secret", "namespace", parentSecretRef.Namespace, "name", parentSecretRef.Name)
+		log.Error(nil, "unable to fetch parent secret. NOTE: if you are referencing a secret cross-namespace, make sure it has the 'secretderiver.lightjack.de/allowCrossnamespaceReference=true' label!", "namespace", parentSecretRef.Namespace, "name", parentSecretRef.Name)
 		if err := r.handleParentSecretNotFound(ctx, derivedSecret); err != nil {
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+
+	if parentSecret.Namespace != derivedSecret.Namespace && parentSecret.Labels["secretderiver.lightjack.de/allowCrossnamespaceReference"] != "true" {
+		log.Error(nil, "unable to fetch parent secret. NOTE: if you are referencing a secret cross-namespace, make sure it has the 'secretderiver.lightjack.de/allowCrossnamespaceReference=true' label!", "namespace", parentSecretRef.Namespace, "name", parentSecretRef.Name)
+		if err := r.handleParentSecretNotFound(ctx, derivedSecret); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil
 	}
 
 	sourceValue, exists := parentSecret.Data[parentSecretKey]
@@ -247,7 +255,7 @@ func (r *DerivedSecretReconciler) handleParentSecretNotFound(ctx context.Context
 			Type:               "Ready",
 			Status:             metav1.ConditionFalse,
 			Reason:             "ParentSecretNotFound",
-			Message:            "The specified parent secret does not exist.",
+			Message:            "The specified parent secret does not exist. NOTE: If you are referencing a secret cross-namespace, make sure it has the 'secretderiver.lightjack.de/allowCrossnamespaceReference=true' label!",
 			LastTransitionTime: metav1.Now(),
 		},
 	}
