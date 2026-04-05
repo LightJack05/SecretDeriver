@@ -4,6 +4,8 @@ A Kubernetes operator that deterministically derives unique secrets from a singl
 
 Each `DerivedSecret` resource points to a parent `Secret` and produces a new `Secret` with a derived value. The derivation uses the `DerivedSecret`'s `namespace/name` as the HKDF salt, so every derived secret is unique but fully reproducible.
 
+**Documentation:** [https://lightjack05.github.io/SecretDeriver/](https://lightjack05.github.io/SecretDeriver/)
+
 ## Installation
 
 ```sh
