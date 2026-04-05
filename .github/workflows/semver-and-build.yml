@@ -73,7 +73,7 @@ jobs:
         run: |
           helm package helm-chart \
             --version ${{ needs.semver.outputs.version }} \
-            --app-version ${{ needs.semver.outputs.version }}
+            --app-version ${{ needs.semver.outputs.tag }}
 
       - name: Push Helm chart to GHCR OCI registry
         run: |
