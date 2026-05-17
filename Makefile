@@ -359,6 +359,7 @@ catalog-build: opm ## Build a catalog image.
 # Push the catalog image.
 .PHONY: catalog-push
 catalog-push: ## Push a catalog image.
+	$(MAKE) docker-push IMG=$(CATALOG_IMG)
 
 # --- Kind Local Deployment Targets ---
 
@@ -378,4 +379,4 @@ kind-deploy:
 .PHONY: kind-undeploy
 kind-undeploy:
 	@echo "Undeploying from kind..."
-	$(MAKE) undeploy$(MAKE) docker-push IMG=$(CATALOG_IMG)
+	$(MAKE) undeploy
