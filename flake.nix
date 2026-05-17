@@ -1,48 +1,63 @@
 {
-  description = "K8s Operator Dev Shell";
+  description = "Operator SDK project dev shell";
 
   inputs = {
-    go-license-collector.url = "github:LightJack05/go-license-collector";
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    operatorSdkShell.url = "git+https://gitea.lightjack.de/LightJack05/nix-library?dir=shells/operator-sdk";
+    generalLib.url = "git+https://gitea.lightjack.de/LightJack05/nix-library?dir=lib/general";
+    podmanLib.url = "git+https://gitea.lightjack.de/LightJack05/nix-library?dir=lib/podman";
+    kindLib.url = "git+https://gitea.lightjack.de/LightJack05/nix-library?dir=lib/kind";
+    # --- Optional libs (uncomment input + merge lines below to enable) ---
+    # qemuLib.url = "git+https://gitea.lightjack.de/LightJack05/nix-library?dir=lib/qemu";
+    goLicenseCollectorLib.url = "git+https://gitea.lightjack.de/LightJack05/nix-library?dir=lib/go-license-collector";
   };
 
-  outputs = { self, nixpkgs, go-license-collector, ... }:
+  outputs = { self, nixpkgs, operatorSdkShell, generalLib, podmanLib, kindLib, goLicenseCollectorLib, ... }:
     let
-      helmify = pkgs.buildGoModule rec {
-        pname = "helmify";
-        version = "0.4.19";
-
-        src = pkgs.fetchFromGitHub {
-          owner = "arttor";
-          repo = "helmify";
-          rev = "v${version}";
-          hash = "sha256-casZJRHpTbakI1FdSYPYcda2G8xPP+feTQil6R+FdbE=";
-        };
-        vendorHash = "sha256-ShX11hDA8oPkvT37vYArL8VzthfWdxbq9mvpYuL/0gE=";
-
-        subPackages = [ "cmd/helmify" ];
-      };
-
-      system = "x86_64-linux";
-      pkgs = nixpkgs.legacyPackages.${system};
+      systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
+      forAllSystems = nixpkgs.lib.genAttrs systems;
     in
     {
-      devShells.${system}.default = pkgs.mkShell {
-        packages = [
-          pkgs.kind
-          pkgs.kubectl
-          pkgs.operator-sdk
-          pkgs.kustomize
-          helmify
-          go-license-collector.packages.${system}.go-license-collector
-        ];
+      devShells = forAllSystems (system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
 
-        KIND_EXPERIMENTAL_PROVIDER="podman";
+          # --- Add project-specific packages here ---
+          extraPackages = [
+          ];
 
-        shellHook = ''
-        export KUBECONFIG=$HOME/.kube/config.d/kind-six-nodes
-        '';
+          # --- Add project-specific shell hook here (env vars, startup messages, etc.) ---
+          extraShellHook = ''
+          export KUBECONFIG=$HOME/.kube/config.d/kind-six-nodes
+          '';
 
-      };
+          # --- Optional lib packages (uncomment matching input above to enable) ---
+          optionalPackages = []
+          # ++ qemuLib.packages.${system}
+          ;
+
+          # --- Optional lib hooks (uncomment matching input above to enable) ---
+          optionalHook = ""
+          # + qemuLib.shellHook
+          ;
+        in
+        {
+          default = pkgs.mkShell {
+            name = "operator-sdk-dev-shell";
+            packages = operatorSdkShell.shellConfig.${system}.packages
+              ++ generalLib.packages.${system}
+              ++ goLicenseCollectorLib.packages.${system}
+              ++ podmanLib.packages.${system}
+              ++ kindLib.packages.${system}
+              ++ optionalPackages
+              ++ extraPackages;
+            shellHook = operatorSdkShell.shellConfig.${system}.shellHook
+              + generalLib.shellHook
+              + podmanLib.shellHook
+              + optionalHook
+              + extraShellHook;
+          };
+        }
+      );
     };
 }

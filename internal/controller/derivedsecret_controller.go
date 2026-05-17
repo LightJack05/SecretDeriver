@@ -52,7 +52,7 @@ func (r *DerivedSecretReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	derivedSecret := &secretderiverv1alpha1.DerivedSecret{}
 	if err := r.Get(ctx, req.NamespacedName, derivedSecret); err != nil {
-		log.Error(err, "unable to fetch DerivedSecret")
+		log.Info("unable to fetch DerivedSecret, did it get deleted?")
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
