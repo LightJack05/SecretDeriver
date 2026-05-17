@@ -28,6 +28,7 @@ jobs:
           default_bump: false
 
       - name: Publish Release
+        if: ${{ steps.tag_version.outputs.new_tag != '' }}
         uses: ncipollo/release-action@v1
         with:
           generateReleaseNotes: true
@@ -37,6 +38,7 @@ jobs:
 
   build-and-push:
     needs: semver
+    if: ${{ needs.semver.outputs.tag != '' }}
     runs-on: ubuntu-latest
 
     permissions:
